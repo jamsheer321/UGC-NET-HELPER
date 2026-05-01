@@ -61,11 +61,11 @@ interface TestState {
 }
 
 // --- Components ---
-const QuestionRow = ({ q, onRemove, onEdit }: { q: Question, onRemove?: (id: string) => void, onEdit?: (q: Question) => void }) => {
+const QuestionRow = ({ q, onRemove, onEdit, isDeleting }: { q: Question, onRemove?: (id: string) => void, onEdit?: (q: Question) => void, isDeleting?: boolean }) => {
   const [showOptions, setShowOptions] = useState(false);
   
   return (
-    <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm space-y-4">
+    <div className={`bg-white p-5 rounded-[2rem] border shadow-sm space-y-4 transition-all ${isDeleting ? 'border-red-200 bg-red-50/30' : 'border-slate-100'}`}>
       <div className="flex justify-between items-start">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
@@ -86,8 +86,13 @@ const QuestionRow = ({ q, onRemove, onEdit }: { q: Question, onRemove?: (id: str
             </button>
           )}
           {onRemove && (
-            <button onClick={() => onRemove(q.id!)} className="p-2 text-slate-300 hover:text-red-500 transition-colors" title="Delete Question">
+            <button 
+              onClick={() => onRemove(q.id!)} 
+              className={`p-2 transition-all flex items-center gap-1 rounded-lg ${isDeleting ? 'bg-red-500 text-white scale-110 px-3' : 'text-slate-300 hover:text-red-500'}`}
+              title={isDeleting ? "Click again to confirm" : "Delete Question"}
+            >
               <Trash2 className="w-4 h-4" />
+              {isDeleting && <span className="text-[10px] font-black uppercase">Confirm?</span>}
             </button>
           )}
         </div>
@@ -259,6 +264,8 @@ export default function App() {
   const [randomize, setRandomize] = useState(true);
   
   // Manage Tab State
+  const [manageModule, setManageModule] = useState(MODULES[0]);
+  const [manageSet, setManageSet] = useState<number | null>(null);
   const [expandedSet, setExpandedSet] = useState<{ module: string, setNum: number } | null>(null);
   
   // Edit Question State
@@ -508,17 +515,32 @@ export default function App() {
     reader.readAsArrayBuffer(file);
   };
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [purgingSetNum, setPurgingSetNum] = useState<number | null>(null);
+
   const handleRemoveQuestion = async (id: string) => {
+    if (!id) {
+      showToast("Question ID missing.", "error");
+      return;
+    }
     if (!auth.currentUser) {
       showToast("Authentication required. Please sign in.", "error");
       signInWithGoogle();
       return;
     }
-    if (!confirm("Are you sure?")) return;
+    
+    if (deletingId !== id) {
+      setDeletingId(id);
+      // Auto-reset after 3 seconds if not confirmed
+      setTimeout(() => setDeletingId(null), 3000);
+      return;
+    }
+
     setLoading(true);
     try {
       await deleteQuestion(id);
       showToast("Question deleted.", "success");
+      setDeletingId(null);
       await fetchQuestions();
     } catch (err: any) {
       showToast(err.message || "Failed to delete question", "error");
@@ -1451,72 +1473,113 @@ export default function App() {
 
               {adminTab === 'manage' && (
                 <div className="space-y-6 pb-12">
-                   {MODULES.map(mod => {
-                     const modQs = questions.filter(q => q.module === mod);
-                     const modSets = Array.from(new Set(modQs.map(q => q.setNumber))).sort((a, b) => a - b);
-                     if (modSets.length === 0) return null;
-                     return (
-                       <div key={mod} className="space-y-4">
-                         <h3 className="text-[14px] font-black text-slate-900 border-l-4 border-indigo-600 pl-3 uppercase tracking-widest">{mod}</h3>
-                         <div className="space-y-6">
-                            {modSets.map(setNum => {
-                              const setQs = modQs.filter(q => q.setNumber === setNum).sort((a, b) => (a.questionNumber || 0) - (b.questionNumber || 0));
-                              return (
-                                <div key={setNum} className="space-y-3">
-                                  <div className="flex items-center justify-between px-2">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-[10px] font-black text-white bg-slate-900 px-3 py-1 rounded-full uppercase tracking-[0.2em]">Set {setNum}</span>
-                                      <span className="text-[10px] font-bold text-slate-400 uppercase">{setQs.length} Qs</span>
-                                    </div>
-                                    <button 
-                                      onClick={async () => {
-                                        if (!auth.currentUser) {
-                                          showToast("Authentication required.", "error");
-                                          signInWithGoogle();
-                                          return;
-                                        }
-                                        if (confirm(`Are you sure you want to delete the entire ${mod} Set ${setNum}?`)) {
-                                          setLoading(true);
-                                          try {
-                                            await deleteSet(mod, setNum);
-                                            showToast(`${mod} Set ${setNum} deleted.`, "success");
-                                            await fetchQuestions();
-                                          } catch (err: any) {
-                                            showToast(err.message || "Failed to purge set", "error");
-                                          } finally {
-                                            setLoading(false);
-                                          }
-                                        }
-                                      }}
-                                      className="text-[9px] font-black text-red-400 hover:text-red-600 uppercase tracking-widest flex items-center gap-1 transition-all"
-                                    >
-                                      <Trash2 className="w-3 h-3" />
-                                      Purge Set
-                                    </button>
-                                  </div>
-                                  <div className="grid gap-3">
-                                    {setQs.map(q => (
-                                      <QuestionRow 
-                                        key={q.id} 
-                                        q={q} 
-                                        onEdit={handleEditQuestion}
-                                        onRemove={handleRemoveQuestion}
-                                      />
-                                    ))}
-                                  </div>
+                   {/* Manage Filters */}
+                   <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Module</label>
+                          <select 
+                            value={manageModule}
+                            onChange={(e) => {
+                              setManageModule(e.target.value);
+                              setManageSet(null); // Reset set when changing module
+                            }}
+                            className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-[14px] font-bold outline-none"
+                          >
+                            {MODULES.map(m => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">Set Number</label>
+                          <select 
+                            value={manageSet || ''}
+                            onChange={(e) => setManageSet(e.target.value ? parseInt(e.target.value) : null)}
+                            className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-[14px] font-bold outline-none"
+                          >
+                            <option value="">All Sets</option>
+                            {Array.from(new Set(questions.filter(q => q.module === manageModule).map(q => q.setNumber)))
+                              .sort((a, b) => a - b)
+                              .map(num => <option key={num} value={num}>Set {num}</option>)
+                            }
+                          </select>
+                        </div>
+                      </div>
+                   </div>
+
+                   <div className="space-y-8">
+                     {(() => {
+                        const modQs = questions.filter(q => q.module === manageModule);
+                        const modSets = Array.from(new Set(modQs.map(q => q.setNumber)))
+                          .sort((a, b) => a - b)
+                          .filter(num => manageSet === null || num === manageSet);
+
+                        if (modSets.length === 0) {
+                          return (
+                            <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                               <Database className="w-12 h-12 text-slate-100" />
+                               <p className="text-slate-400 text-sm font-medium">No questions found for this selection.</p>
+                            </div>
+                          );
+                        }
+
+                        return modSets.map(setNum => {
+                          const setQs = modQs.filter(q => q.setNumber === setNum).sort((a, b) => (a.questionNumber || 0) - (b.questionNumber || 0));
+                          return (
+                            <div key={setNum} className="space-y-4">
+                              <div className="flex items-center justify-between px-2">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-1.5 h-6 bg-indigo-600 rounded-full" />
+                                  <h3 className="text-[15px] font-black text-slate-900 uppercase tracking-widest">{manageModule} | Set {setNum}</h3>
+                                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-0.5 rounded-full uppercase tracking-tighter">{setQs.length} Questions</span>
                                 </div>
-                              );
-                            })}
-                         </div>
-                       </div>
-                     );
-                   })}
-                   {questions.length === 0 && (
-                     <div className="flex flex-col items-center justify-center py-20 space-y-4">
-                        <Database className="w-12 h-12 text-slate-100" />
-                        <p className="text-slate-400 text-sm font-medium">Database is empty.</p>
-                     </div>
-                   )}
+                                <button 
+                                  onClick={async () => {
+                                    if (!auth.currentUser) {
+                                      showToast("Authentication required.", "error");
+                                      signInWithGoogle();
+                                      return;
+                                    }
+                                    
+                                    if (purgingSetNum !== setNum) {
+                                      setPurgingSetNum(setNum);
+                                      setTimeout(() => setPurgingSetNum(null), 3000);
+                                      return;
+                                    }
+
+                                    setLoading(true);
+                                    try {
+                                      await deleteSet(manageModule, setNum);
+                                      showToast(`${manageModule} Set ${setNum} deleted.`, "success");
+                                      setPurgingSetNum(null);
+                                      await fetchQuestions();
+                                    } catch (err: any) {
+                                      showToast(err.message || "Failed to purge set", "error");
+                                    } finally {
+                                      setLoading(false);
+                                    }
+                                  }}
+                                  className={`text-[9px] font-black uppercase tracking-widest flex items-center gap-1 transition-all px-3 py-1 rounded-full ${purgingSetNum === setNum ? 'bg-red-500 text-white animate-pulse' : 'text-red-400 hover:text-red-500'}`}
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  {purgingSetNum === setNum ? 'Confirm Purge?' : 'Purge Set'}
+                                </button>
+                              </div>
+                              <div className="grid gap-3">
+                                {setQs.map(q => (
+                                  <QuestionRow 
+                                    key={q.id} 
+                                    q={q} 
+                                    onEdit={handleEditQuestion}
+                                    onRemove={handleRemoveQuestion}
+                                    isDeleting={deletingId === q.id}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        });
+                     })()}
+                   </div>
                 </div>
               )}
 

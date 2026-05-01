@@ -114,11 +114,18 @@ export const deleteSet = async (module: string, setNumber: number) => {
   try {
     const q = query(collection(db, path), where('module', '==', module), where('setNumber', '==', setNumber));
     const snapshot = await getDocs(q);
-    const batch = writeBatch(db);
-    snapshot.docs.forEach(doc => {
-      batch.delete(doc.ref);
-    });
-    await batch.commit();
+    
+    const docs = snapshot.docs;
+    const CHUNK_SIZE = 450; // Staying safe under 500
+
+    for (let i = 0; i < docs.length; i += CHUNK_SIZE) {
+      const chunk = docs.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(d => {
+        batch.delete(d.ref);
+      });
+      await batch.commit();
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `questions/module/${module}/set/${setNumber}`);
   }
