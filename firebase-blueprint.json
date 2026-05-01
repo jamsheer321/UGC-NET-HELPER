@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "Question": {
+      "title": "Question",
+      "description": "A multiple choice question for a mock test",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "The question text" },
+        "options": {
+          "type": "object",
+          "properties": {
+            "A": { "type": "string" },
+            "B": { "type": "string" },
+            "C": { "type": "string" },
+            "D": { "type": "string" }
+          },
+          "required": ["A", "B", "C", "D"]
+        },
+        "correctAnswer": { "type": "string", "enum": ["A", "B", "C", "D"] },
+        "module": { "type": "string" },
+        "setNumber": { "type": "integer" },
+        "questionNumber": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "options", "correctAnswer", "module", "setNumber"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "Module-specific notes and references",
+      "type": "object",
+      "properties": {
+        "module": { "type": "string" },
+        "content": { "type": "string" },
+        "pdfUrl": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["module", "content"]
+    }
+  },
+  "firestore": {
+    "/questions/{questionId}": {
+      "schema": "Question",
+      "description": "Storage for mock test questions"
+    },
+    "/notes/{noteId}": {
+      "schema": "Note",
+      "description": "Storage for module-specific notes"
+    }
+  }
+}

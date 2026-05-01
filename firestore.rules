@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && 
+             (request.auth.token.email.lower() == "bookdistribution2020@gmail.com" || 
+              (exists(/databases/$(database)/documents/admins/$(request.auth.uid))));
+    }
+
+    function isValidId(id) {
+      // Allow letters, numbers, spaces, underscores, and hyphens
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\- ]+$');
+    }
+
+    // Validation for Question
+    function isValidQuestion(data) {
+      return data.keys().hasAll(['text', 'options', 'correctAnswer', 'module', 'setNumber'])
+        && data.keys().size() >= 5
+        && data.text is string && data.text.size() <= 10000
+        && data.options is map
+        && data.options.keys().hasAll(['A', 'B', 'C', 'D'])
+        && data.options.keys().size() == 4
+        && data.correctAnswer in ['A', 'B', 'C', 'D']
+        && data.module is string && data.module.size() <= 200
+        && data.setNumber is int
+        && (!('createdAt' in data) || data.createdAt == request.time)
+        && (!('updatedAt' in data) || data.updatedAt == request.time);
+    }
+
+    // Validation for Category
+    function isValidCategory(data) {
+      return data.keys().hasAll(['name'])
+        && data.name is string && data.name.size() <= 100;
+    }
+
+    // Validation for Note
+    function isValidNote(data) {
+      return data.keys().hasAll(['module', 'content'])
+        && data.module is string && data.module.size() <= 200
+        && data.content is string && data.content.size() <= 20000;
+    }
+
+    // Questions Collection
+    match /questions/{questionId} {
+      allow read: if true; 
+      allow create: if isAdmin() && isValidQuestion(request.resource.data);
+      allow update: if isAdmin(); 
+      allow delete: if isAdmin();
+    }
+
+    // Notes Collection
+    match /notes/{noteId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Categories Collection
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidCategory(request.resource.data);
+      allow update: if isAdmin() && isValidCategory(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Admins Collection - Extremely restricted
+    match /admins/{adminId} {
+      allow read: if isAdmin();
+      allow write: if false; // Admins must be provisioned manually or via secure console
+    }
+  }
+}
